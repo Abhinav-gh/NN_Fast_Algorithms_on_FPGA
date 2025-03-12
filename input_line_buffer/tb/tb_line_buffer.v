@@ -35,11 +35,11 @@ module line_buffer_tb_vivado;
     
     
     // Variables for testing
-    integer write_count;
-    integer read_count;
+    integer wr_ptr;
+    integer rd_ptr;
     integer total_elements;
     integer i, j;
-    integer num_reads_to_validate;
+    integer how_many_reads_to_validate;
     reg continue_reading;
     
     // For output verification
@@ -88,17 +88,18 @@ module line_buffer_tb_vivado;
     
     initial begin
         // Initialize signals
-        clk = 0;
+        clk = 1;
         rst = 1;
         data_in = 0;
         data_valid = 0;
         rd_data = 0;
-        write_count = 0;
-        read_count = 0;
+        wr_ptr = 0;
+        // we have to start validating from rdPntr=1
+        rd_ptr = 1;
         total_elements = M * W;
 
         // We'll validate 10 reads
-        num_reads_to_validate = 10; 
+        how_many_reads_to_validate = 10; 
         continue_reading = 1;
         
         // Reset for 30ns
@@ -118,15 +119,15 @@ module line_buffer_tb_vivado;
             @(posedge clk);
             data_valid = 1;
             // Values 0-255 repeating
-            data_in = write_count % 256; 
-            write_count = write_count + 1;
+            data_in = wr_ptr % 256; 
+            wr_ptr = wr_ptr + 1;
         end
         
         // wait for the last write to complete
         @(posedge clk); 
 
         data_valid = 0;
-        $display("Finished filling the line buffer with %0d elements", write_count);
+        $display("Finished filling the line buffer with %0d elements", wr_ptr);
         
         // Wait a few clock cycles
         repeat(5) @(posedge clk);
@@ -138,34 +139,35 @@ module line_buffer_tb_vivado;
         continue_reading = 1;
         repeat (W) begin
             if (continue_reading) begin
+
+                // Assert read enable for one cycle
+                @(posedge clk);
+                rd_data = 1;
                 
                 // Calculate expected output
                 expected_output = 0;
                 for (i = 0; i < M; i = i + 1) begin
                     for (j = 0; j < n; j = j + 1) begin
-                        expected_output[((M-1-i)*n*8 + (n-1-j)*8) +: 8] = expected_data[i*W + read_count + j];
+                        expected_output[((M-1-i)*n*8 + (n-1-j)*8) +: 8] = expected_data[i*W + rd_ptr + j];
                     end
                 end
 
-                // Assert read enable for one cycle
-                @(posedge clk);
-                rd_data = 1;
                 
                 // Check output on next clock
                 @(posedge clk);
                 rd_data = 0;
                 
                 if (data_out !== expected_output) begin
-                    $display("ERROR at read_count=%0d: Expected %h, Got %h", read_count, expected_output, data_out);
+                    $display("ERROR at rd_ptr=%0d: Expected %h, Got %h", rd_ptr, expected_output, data_out);
                 end else begin
-                    $display("Validation PASSED at read_count=%0d", read_count);
+                    $display("Validation PASSED at rd_ptr=%0d", rd_ptr);
                 end
                 
-                read_count = read_count + 1;
+                rd_ptr = rd_ptr + 1;
                 
                 // Only validate a few reads to keep output manageable
-                if (read_count >= num_reads_to_validate) begin
-                    $display("Truncating validation after %0d reads", num_reads_to_validate);
+                if (rd_ptr >= how_many_reads_to_validate) begin
+                    $display("Truncating validation after %0d reads", how_many_reads_to_validate);
                     continue_reading = 0;
                 end
             end
