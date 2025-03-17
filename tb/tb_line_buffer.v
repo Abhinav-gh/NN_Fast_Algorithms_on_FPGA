@@ -7,6 +7,7 @@ module line_buffer_tb_vivado;
     parameter integer M = 3;
     parameter integer W = 512;
     parameter integer n = 4;
+    parameter integer m = 2;
 
     // Calculated parameters
     parameter integer DATA_WIDTH = M*n*8;
@@ -17,20 +18,21 @@ module line_buffer_tb_vivado;
     reg [7:0] data_in;
     reg data_valid;
     wire [DATA_WIDTH-1:0] data_out;
-    reg rd_data;
+    reg output_needs_to_be_read;
 
     // Instantiate the Unit Under Test (UUT)
     line_buffer #(
         .M(M),
         .W(W),
-        .n(n)
+        .n(n),
+        .m(m)
     ) uut (
         .i_clk(clk),
         .i_rst(rst),
         .i_data(data_in),
         .i_data_valid(data_valid),
         .o_data(data_out),
-        .i_rd_data(rd_data)
+        .output_needs_to_be_read(output_needs_to_be_read)
     );
     
     
@@ -92,10 +94,10 @@ module line_buffer_tb_vivado;
         rst = 1;
         data_in = 0;
         data_valid = 0;
-        rd_data = 0;
+        output_needs_to_be_read = 0;
         wr_ptr = 0;
-        // we have to start validating from rdPntr=1
-        rd_ptr = 1;
+        // we have to start validating from rdPntr=2
+        rd_ptr = 2;
         total_elements = M * W;
 
         // We'll validate 10 reads
@@ -142,7 +144,7 @@ module line_buffer_tb_vivado;
 
                 // Assert read enable for one cycle
                 @(posedge clk);
-                rd_data = 1;
+                output_needs_to_be_read = 1;
                 
                 // Calculate expected output
                 expected_output = 0;
@@ -155,7 +157,7 @@ module line_buffer_tb_vivado;
                 
                 // Check output on next clock
                 @(posedge clk);
-                rd_data = 0;
+                output_needs_to_be_read = 0;
                 
                 if (data_out !== expected_output) begin
                     $display("ERROR at rd_ptr=%0d: Expected %h, Got %h", rd_ptr, expected_output, data_out);
@@ -163,7 +165,7 @@ module line_buffer_tb_vivado;
                     $display("Validation PASSED at rd_ptr=%0d", rd_ptr);
                 end
                 
-                rd_ptr = rd_ptr + 1;
+                rd_ptr = rd_ptr + m;
                 
                 // Only validate a few reads to keep output manageable
                 if (rd_ptr >= how_many_reads_to_validate) begin
@@ -180,8 +182,8 @@ module line_buffer_tb_vivado;
     
     // Monitor for debug
     initial begin
-        $monitor("Time=%0t, Reset=%b, WrPtr=%0d, RdPtr=%0d, Data_Valid=%b, Rd_Data=%b", 
-                    $time, rst, uut.wrPntr, uut.rdPntr, data_valid, rd_data);
+        $monitor("Time=%0t, Reset=%b, WrPtr=%0d, RdPtr=%0d, Data_Valid=%b, output_needs_to_be_read=%b", 
+                    $time, rst, uut.wrPntr, uut.rdPntr, data_valid, output_needs_to_be_read);
     end
 
 endmodule
