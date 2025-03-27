@@ -11,19 +11,17 @@
       </db_ref>
    </db_ref_list>
    <zoom_setting>
-      <ZoomStartTime time="15,381.955 ns"></ZoomStartTime>
-      <ZoomEndTime time="15,446.123 ns"></ZoomEndTime>
-      <Cursor1Time time="15,490.000 ns"></Cursor1Time>
+      <ZoomStartTime time="15,372.413 ns"></ZoomStartTime>
+      <ZoomEndTime time="15,470.893 ns"></ZoomEndTime>
+      <Cursor1Time time="15,418.629 ns"></Cursor1Time>
    </zoom_setting>
    <column_width_setting>
       <NameColumnWidth column_width="340"></NameColumnWidth>
-      <ValueColumnWidth column_width="150"></ValueColumnWidth>
+      <ValueColumnWidth column_width="145"></ValueColumnWidth>
    </column_width_setting>
-   <WVObjectSize size="16" />
+   <WVObjectSize size="15" />
    <wave_markers>
-      <marker label="" time="15390000" />
-      <marker label="" time="15450031" />
-      <marker label="" time="15469912" />
+      <marker label="" time="15450000" />
    </wave_markers>
    <wvobject type="logic" fp_name="/line_buffer_tb_vivado/clk">
       <obj_property name="ElementShortName">clk</obj_property>
@@ -41,9 +39,9 @@
          <obj_property name="ElementShortName">data_valid</obj_property>
          <obj_property name="ObjectShortName">data_valid</obj_property>
       </wvobject>
-      <wvobject type="logic" fp_name="/line_buffer_tb_vivado/rd_data">
-         <obj_property name="ElementShortName">rd_data</obj_property>
-         <obj_property name="ObjectShortName">rd_data</obj_property>
+      <wvobject type="logic" fp_name="/line_buffer_tb_vivado/output_needs_to_be_read">
+         <obj_property name="ElementShortName">output_needs_to_be_read</obj_property>
+         <obj_property name="ObjectShortName">output_needs_to_be_read</obj_property>
       </wvobject>
    </wvobject>
    <wvobject type="group" fp_name="group270">
@@ -74,10 +72,6 @@
    <wvobject type="array" fp_name="/line_buffer_tb_vivado/data_in">
       <obj_property name="ElementShortName">data_in[7:0]</obj_property>
       <obj_property name="ObjectShortName">data_in[7:0]</obj_property>
-   </wvobject>
-   <wvobject type="array" fp_name="/line_buffer_tb_vivado/num_reads_to_validate">
-      <obj_property name="ElementShortName">num_reads_to_validate[31:0]</obj_property>
-      <obj_property name="ObjectShortName">num_reads_to_validate[31:0]</obj_property>
    </wvobject>
    <wvobject type="logic" fp_name="/line_buffer_tb_vivado/continue_reading">
       <obj_property name="ElementShortName">continue_reading</obj_property>

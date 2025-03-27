@@ -23,8 +23,7 @@ reg rd_line_buffer;
 reg [11:0] totalPixelCounter;
 reg rdState;
 
-localparam IDLE = 'b0,
-           RD_BUFFER = 'b1;
+localparam IDLE = 'b0, RD_BUFFER = 'b1;
 
 assign o_pixel_data_valid = rd_line_buffer;
 
