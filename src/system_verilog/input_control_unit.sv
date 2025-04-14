@@ -1,116 +1,99 @@
 module line_buffer #(
-    parameter integer M = 3,        // Number of channels
-    parameter integer W = 512,       // Width of each Image
-    parameter integer n = 4,          // Input Tile size
-    parameter integer m = 2         // Output tiles, which is also the Stride
-)
-(
-    input                   i_clk,
-    input                   i_rst,
-    input [7:0]             i_data,
-    input                   i_data_valid,
-    output reg [M*n*8-1:0] o_data,
-    input                   output_needs_to_be_read
+    parameter int M = 3,        // Number of channels
+    parameter int W = 512,      // Width of each Image
+    parameter int n = 4,         // Input Tile size
+    parameter int m = 2         // Output tiles, which is also the Stride
+)(
+    input logic                   i_clk,
+    input logic                   i_rst,
+    input logic [7:0]             i_data,
+    input logic                   i_data_valid,
+    output logic [M*n*8-1:0]      o_data,
+    input logic                   output_needs_to_be_read
 );
 
-    // Calculate pointer width based on M*W, 10 in our case
-    localparam PNTR_WIDTH = $clog2(M*W);
+    // Calculate pointer width based on M*W
+    localparam int PNTR_WIDTH = $clog2(M*W);
 
     // Internal signals
-    reg [7:0] line [0:M*W-1];       // Line buffer memory
-    reg [PNTR_WIDTH-1:0] wrPntr;   // Write pointer
-    reg [PNTR_WIDTH-1:0] rdPntr;   // Read pointer
+    logic [7:0] line [M*W];       // Line buffer memory
+    logic [PNTR_WIDTH-1:0] wrPntr;   // Write pointer
+    logic [PNTR_WIDTH-1:0] rdPntr;   // Read pointer
 
-    integer i,j ;
-
-    // Write pointer logic 
-    always @(posedge i_clk) begin
+    // Write pointer logic
+    always_ff @(posedge i_clk) begin
         if (i_rst)
-            wrPntr <= 0;
+            wrPntr <= '0;
         else if (i_data_valid)
             wrPntr <= wrPntr + 1;
     end
 
-
     // Write data to line buffer
-    always @(posedge i_clk) begin
+    always_ff @(posedge i_clk) begin
         if (i_data_valid)
             line[wrPntr] <= i_data;
     end
 
-
     // Read data from line buffer
-    always @(*) begin
-        o_data = {M*n*8{1'b0}}; // Default value
-        for (i = 0; i < M; i = i + 1) begin
-            for (j = 0; j < n; j = j + 1) begin
+    always_comb begin
+        o_data = '{default: '0}; // Default value
+        for (int i = 0; i < M; i++) begin
+            for (int j = 0; j < n; j++) begin
                 // we are reading n pixels from each channel and storing them in o_data
-                // o_data is a 1D array of size M*n*8, 
+                // o_data is a 1D array of size M*n*8
                 o_data[((M-1-i)*n*8 + (n-1-j)*8) +: 8] = line[i*W + rdPntr + j];
             end
         end
     end
 
     // Read pointer logic
-    always @(posedge i_clk) begin
+    always_ff @(posedge i_clk) begin
         if (i_rst)
-            rdPntr <= 0;
+            rdPntr <= '0;
         else if (output_needs_to_be_read)
             rdPntr <= rdPntr + m;
     end
-
 endmodule
 
-
-    /*
-    The implementation uses a 3-cycle read process:
-
-    First cycle: Prepare for read
-    Second cycle: Assert output_needs_to_be_read signals
-    Third cycle: Capture data and assert o_ready
-    */
-
-
 module input_control_unit #(
-    parameter integer M = 3,        // Number of channels
-    parameter integer W = 512,       // Width of each Image
-    parameter integer n = 4          // Input Tile size
-    )(
-    input                    i_clk,
-    input                    i_rst,
-    input [7:0]              i_pixel_data,
-    input                    i_pixel_data_valid,
-    input                    proc_finish,
-    output reg [3*4*4*8-1:0] o_input_tile_across_all_channel,
-    output reg               o_ready
+    parameter int M = 3,        // Number of channels
+    parameter int W = 512,      // Width of each Image
+    parameter int n = 4         // Input Tile size
+)(
+    input logic                   i_clk,
+    input logic                   i_rst,
+    input logic [7:0]             i_pixel_data,
+    input logic                   i_pixel_data_valid,
+    input logic                   proc_finish,
+    output logic [3*4*4*8-1:0]    o_input_tile_across_all_channel,
+    output logic                  o_ready
 );
 
     // Circular Buffer's Finite State Machine Implementation
-    localparam INIT_STATE = 2'b00;
-    localparam STATE1 = 2'b01;
-    localparam STATE2 = 2'b10;
-    localparam STATE3 = 2'b11;
-        
-    // State register
-    reg [1:0] current_state;
-    reg [1:0] next_state;
+    enum logic [1:0] {
+        INIT_STATE = 2'b00,
+        STATE1     = 2'b01,
+        STATE2     = 2'b10,
+        STATE3     = 2'b11
+    } current_state, next_state;
         
     // Line buffer selection control
-    reg [5:0] lb_fill_sel;      // Which line buffers to fill
-    reg [5:0] lb_read_sel;      // Which line buffers to read
+    logic [5:0] lb_fill_sel;      // Which line buffers to fill
+    logic [5:0] lb_read_sel;      // Which line buffers to read
         
     // Counters
-    reg [19:0] fill_counter;    // Counter for filling line buffers
-    reg [19:0] read_counter;    // Counter for reading line buffers
-    reg [1:0]  read_cycle;      // Tracks position within read cycle
+    logic [19:0] fill_counter;    // Counter for filling line buffers
+    logic [19:0] read_counter;    // Counter for reading line buffers
+    logic [1:0]  read_cycle;      // Tracks position within read cycle
         
     // Line buffer output signals
-    wire [M*n*8-1:0] lb1_data, lb2_data, lb3_data, lb4_data, lb5_data, lb6_data;
-    reg lb1_is_ready_to_be_read, lb2_is_ready_to_be_read, lb3_is_ready_to_be_read, lb4_is_ready_to_be_read, lb5_is_ready_to_be_read, lb6_is_ready_to_be_read;
+    logic [M*n*8-1:0] lb1_data, lb2_data, lb3_data, lb4_data, lb5_data, lb6_data;
+    logic lb1_is_ready_to_be_read, lb2_is_ready_to_be_read, lb3_is_ready_to_be_read, 
+        lb4_is_ready_to_be_read, lb5_is_ready_to_be_read, lb6_is_ready_to_be_read;
         
     // Pixel routing control
-    reg [7:0] pixel_to_lb1, pixel_to_lb2, pixel_to_lb3, pixel_to_lb4, pixel_to_lb5, pixel_to_lb6;
-    reg valid_to_lb1, valid_to_lb2, valid_to_lb3, valid_to_lb4, valid_to_lb5, valid_to_lb6;
+    logic [7:0] pixel_to_lb1, pixel_to_lb2, pixel_to_lb3, pixel_to_lb4, pixel_to_lb5, pixel_to_lb6;
+    logic valid_to_lb1, valid_to_lb2, valid_to_lb3, valid_to_lb4, valid_to_lb5, valid_to_lb6;
         
     // Line buffer instantiations
     line_buffer #(
@@ -192,7 +175,7 @@ module input_control_unit #(
     );
         
     // State transition logic
-    always @(posedge i_clk or posedge i_rst) begin
+    always_ff @(posedge i_clk or posedge i_rst) begin
         if (i_rst)
             current_state <= INIT_STATE;
         else if (proc_finish)
@@ -201,13 +184,11 @@ module input_control_unit #(
             current_state <= next_state;
     end
         
-    // Next state logic := PURELY COMBINATORIAL
-    always @(*) begin
+    // Next state logic
+    always_comb begin
         next_state = current_state;
-        // The primary purpose of the above line is to define the default behavior of this state machine. It says :-
-        // "Unless explicitly told to transition to a different state within the case statement, the next state will be the same as the current state."
             
-        case (current_state)
+        unique case (current_state)
             INIT_STATE: begin
                 if (fill_counter >= (M*W*4 - 1) && i_pixel_data_valid)
                     next_state = STATE1;
@@ -231,54 +212,47 @@ module input_control_unit #(
     end
         
     // Fill counter logic
-    always @(posedge i_clk or posedge i_rst) begin
+    always_ff @(posedge i_clk or posedge i_rst) begin
         if (i_rst) begin
-            fill_counter <= 0;
+            fill_counter <= '0;
         end else if (i_pixel_data_valid) begin
-            case (current_state)
+            unique case (current_state)
                 INIT_STATE: begin
-                    if (fill_counter >= (M*W*4 - 1)) begin
-                        fill_counter <= 0;
-                        // Debug message for testing purposes
-                        $display("INIT_STATE complete at time %0t", $time);
-                    end else begin
+                    if (fill_counter >= (M*W*4 - 1))
+                        fill_counter <= '0;
+                    else
                         fill_counter <= fill_counter + 1;
-                    end
                 end
                     
                 default: begin // STATE1, STATE2, STATE3
-                    if (fill_counter >= (M*W*2 - 1)) begin
-                        fill_counter <= 0;
-                        // Debug message for testing purposes
-                        $display("STATE%0d complete at time %0t", current_state, $time);
-                    end else begin
+                    if (fill_counter >= (M*W*2 - 1))
+                        fill_counter <= '0;
+                    else
                         fill_counter <= fill_counter + 1;
-                    end
                 end
             endcase
         end
     end
-
-
+        
     // Read counter logic
-    always @(posedge i_clk or posedge i_rst) begin
+    always_ff @(posedge i_clk or posedge i_rst) begin
         if (i_rst) begin
-            read_counter <= 0;
-            read_cycle <= 0;
-            o_ready <= 0;
+            read_counter <= '0;
+            read_cycle <= '0;
+            o_ready <= '0;
         end else begin
-            case (current_state)
+            unique case (current_state)
                 INIT_STATE: begin
-                    read_counter <= 0;
-                    read_cycle <= 0;
-                    o_ready <= 0;
+                    read_counter <= '0;
+                    read_cycle <= '0;
+                    o_ready <= '0;
                 end
                     
                 default: begin // STATE1, STATE2, STATE3
                     if (read_cycle == 2'd2) begin
-                        read_cycle <= 0;
+                        read_cycle <= '0;
                         if (read_counter >= (W - n))
-                            read_counter <= 0;
+                            read_counter <= '0;
                         else
                             read_counter <= read_counter + 1;
                     end else begin
@@ -293,12 +267,12 @@ module input_control_unit #(
     end
         
     // Line buffer selection logic
-    always @(*) begin
+    always_comb begin
         // Default: no line buffers selected
         lb_fill_sel = 6'b000000;
         lb_read_sel = 6'b000000;
             
-        case (current_state)
+        unique case (current_state)
             INIT_STATE: begin
                 // Fill LB3, LB4, LB5, LB6 in sequence
                 if (fill_counter < M*W)
@@ -311,38 +285,32 @@ module input_control_unit #(
                     lb_fill_sel = 6'b100000;      // LB6
             end
                 
-            // Fill LB1, LB2 in sequence ; READ LB3, LB4, LB5, LB6
             STATE1: begin
-                if( fill_counter <= M*W-1) lb_fill_sel = 6'b000001;         
-                else  lb_fill_sel = 6'b000010;          
-                lb_read_sel = 6'b111100;          
+                lb_fill_sel = 6'b000011;          // Fill LB1, LB2
+                lb_read_sel = 6'b111100;          // Read LB3, LB4, LB5, LB6
             end
-            // Fill LB3, LB4 sequentially ;  Read LB5, LB6, LB1, LB2
+                
             STATE2: begin
-                if (fill_counter <= M*W-1)  lb_fill_sel = 6'b000100;
-                else lb_fill_sel = 6'b001000;      
-                lb_read_sel = 6'b110011;          
+                lb_fill_sel = 6'b001100;          // Fill LB3, LB4
+                lb_read_sel = 6'b110011;          // Read LB5, LB6, LB1, LB2
             end
-            // Fill LB5, LB6 sequentially ; // Read LB1, LB2, LB3, LB4
+                
             STATE3: begin
-                if (fill_counter <= M*W-1) lb_fill_sel = 6'b010000;      
-                else lb_fill_sel = 6'b100000;      
-                lb_read_sel = 6'b001111;          
+                lb_fill_sel = 6'b110000;          // Fill LB5, LB6
+                lb_read_sel = 6'b001111;          // Read LB1, LB2, LB3, LB4
             end
         endcase
     end
-
-
-
+        
     // Pixel routing logic
-    always @(*) begin
+    always_comb begin
         // Default: no data valid to any line buffer
-        valid_to_lb1 = 1'b0;
-        valid_to_lb2 = 1'b0;
-        valid_to_lb3 = 1'b0;
-        valid_to_lb4 = 1'b0;
-        valid_to_lb5 = 1'b0;
-        valid_to_lb6 = 1'b0;
+        valid_to_lb1 = '0;
+        valid_to_lb2 = '0;
+        valid_to_lb3 = '0;
+        valid_to_lb4 = '0;
+        valid_to_lb5 = '0;
+        valid_to_lb6 = '0;
             
         // Route pixel data to selected line buffers
         pixel_to_lb1 = i_pixel_data;
@@ -363,14 +331,14 @@ module input_control_unit #(
     end
         
     // Line buffer read control
-    always @(*) begin
+    always_comb begin
         // Default: no reads
-        lb1_is_ready_to_be_read = 1'b0;
-        lb2_is_ready_to_be_read = 1'b0;
-        lb3_is_ready_to_be_read = 1'b0;
-        lb4_is_ready_to_be_read = 1'b0;
-        lb5_is_ready_to_be_read = 1'b0;
-        lb6_is_ready_to_be_read = 1'b0;
+        lb1_is_ready_to_be_read = '0;
+        lb2_is_ready_to_be_read = '0;
+        lb3_is_ready_to_be_read = '0;
+        lb4_is_ready_to_be_read = '0;
+        lb5_is_ready_to_be_read = '0;
+        lb6_is_ready_to_be_read = '0;
             
         // Enable reads for selected line buffers during read cycle
         if (current_state != INIT_STATE && read_cycle == 2'd1) begin
@@ -384,30 +352,28 @@ module input_control_unit #(
     end
         
     // Output tile formation
-    always @(posedge i_clk) begin
+    always_ff @(posedge i_clk) begin
         if (i_rst) begin
-            o_input_tile_across_all_channel <= 0;
+            o_input_tile_across_all_channel <= '0;
         end else if (o_ready) begin
-            case (current_state)
-                // LSB as the first data
+            unique case (current_state)
                 STATE1: begin
-                    o_input_tile_across_all_channel <= {lb6_data, lb5_data, lb4_data, lb3_data};
+                    o_input_tile_across_all_channel <= {lb3_data, lb4_data, lb5_data, lb6_data};
                 end
                     
                 STATE2: begin
-                    o_input_tile_across_all_channel <= {lb2_data, lb1_data, lb6_data, lb5_data};
+                    o_input_tile_across_all_channel <= {lb5_data, lb6_data, lb1_data, lb2_data};
                 end
                     
                 STATE3: begin
-                    o_input_tile_across_all_channel <= {lb4_data, lb3_data, lb2_data, lb1_data};
+                    o_input_tile_across_all_channel <= {lb1_data, lb2_data, lb3_data, lb4_data};
                 end
                     
                 default: begin
-                    o_input_tile_across_all_channel <= 0;
+                    o_input_tile_across_all_channel <= '0;
                 end
             endcase
         end
     end
-
 
 endmodule

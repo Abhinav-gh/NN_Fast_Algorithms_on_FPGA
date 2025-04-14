@@ -6,6 +6,7 @@ module line_buffer_tb_vivado;
     parameter int M = 3;
     parameter int W = 512;
     parameter int n = 4;
+    // we have to start validating from rdPntr=2
     parameter int m = 2;
 
     // Calculated parameters
@@ -77,6 +78,7 @@ module line_buffer_tb_vivado;
         repeat (total_elements) begin
             @(posedge clk);
             data_valid = 1;
+            // Values 0-255 repeating
             data_in = wr_ptr % 256; 
             wr_ptr++;
         end

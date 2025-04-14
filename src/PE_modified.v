@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 
-module PE #( 
+module PE_new #( 
     parameter KERNEL_SIZE       = 3,
     INPUT_TILE_SIZE   = 4,
     INPUT_DATA_WIDTH  = 8,
@@ -30,35 +30,39 @@ module PE #(
     localparam OUTPUT_REG_WIDTH_1 = OUTPUT_REG_WIDTH + 2;
     localparam OUTPUT_FINAL_WIDTH = OUTPUT_REG_WIDTH_1 + 1;
     
+    // Fixed-point implementation with Q8.8 format (8 integer bits, 8 fractional bits)
+    // Parameters for fixed-point representation
+    localparam INT_BITS = 8;
+    localparam FRAC_BITS = 8;
+    localparam TOTAL_BITS = INT_BITS + FRAC_BITS;
+    
+    // Fixed-point constant for 0.5 in Q8.8 format = 0.5 * 2^8 = 128
+    localparam signed [TOTAL_BITS-1:0] HALF = 16'h0080; 
+    
     // Defining the registers
-    reg signed [KERNEL_DATA_WIDTH - 1 : 0] kernel_reg [KERNEL_SIZE - 1 : 0] [KERNEL_SIZE - 1 : 0] [CHANNELS - 1 : 0]; // This register will hold all the Kernel Values in correct format
-    reg signed [INPUT_DATA_WIDTH - 1 : 0] input_reg [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0]; // This register will hold all the Input Values in correct format
+    reg signed [KERNEL_DATA_WIDTH - 1 : 0] kernel_reg [KERNEL_SIZE - 1 : 0] [KERNEL_SIZE - 1 : 0] [CHANNELS - 1 : 0]; // Original kernel values
+    reg signed [INPUT_DATA_WIDTH - 1 : 0] input_reg [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0]; // Original input values
     
-    // These two registers are used for transforming the input
-    reg signed [INPUT_TRANSFORMED_WIDTH - 1 : 0] input_temp_reg [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0]; // (Bd g) = D
-    reg signed [INPUT_TRANSFORMATION_WIDTH_FINAL - 1 : 0] input_transformed_reg [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0]; // (D Bd') = Transformed Input
+    // Fixed-point versions of the kernel and intermediate results
+    reg signed [TOTAL_BITS-1:0] kernel_fixed [KERNEL_SIZE - 1 : 0] [KERNEL_SIZE - 1 : 0] [CHANNELS - 1 : 0];
+    reg signed [TOTAL_BITS-1:0] kernel_temp_fixed [INPUT_TILE_SIZE - 1 : 0] [KERNEL_SIZE - 1 : 0] [CHANNELS - 1 : 0];
+    reg signed [TOTAL_BITS-1:0] kernel_transformed_fixed [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0];
     
-    // These two registers are used for transforming the Kernel
-    reg signed [KERNEL_TRANSFORMED_WIDTH - 1 : 0] kernel_temp_reg [INPUT_TILE_SIZE - 1 : 0] [KERNEL_SIZE - 1 : 0] [CHANNELS - 1 : 0];
-    reg signed [KERNEL_TRANSFORMATION_WIDTH_FINAL - 1 : 0] kernel_transformed_reg [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0];
-        
-    reg signed [EWMM_WIDTH -1 : 0] ewmm_reg [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0]; // Element-Wise Matrix Multiplication
+    // Input transformation registers (standard integers for input part)
+    reg signed [INPUT_TRANSFORMED_WIDTH - 1 : 0] input_temp_reg [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0];
+    reg signed [INPUT_TRANSFORMATION_WIDTH_FINAL - 1 : 0] input_transformed_reg [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0];
     
-    // These two registers are used for transforming the output
+    // Element-wise multiplication and output registers
+    reg signed [EWMM_WIDTH + FRAC_BITS - 1 : 0] ewmm_reg [INPUT_TILE_SIZE - 1 : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0]; // Needs extra bits for fractional part
     reg signed [OUTPUT_REG_WIDTH - 1 : 0] output_reg1 [INPUT_TILE_SIZE - KERNEL_SIZE : 0] [INPUT_TILE_SIZE - 1 : 0] [CHANNELS - 1 : 0];
     reg signed [OUTPUT_REG_WIDTH_1 - 1 : 0] output_reg2 [INPUT_TILE_SIZE - KERNEL_SIZE : 0] [INPUT_TILE_SIZE - KERNEL_SIZE : 0] [CHANNELS - 1 : 0];
-    
-    // This register stores the final output after the accumulation step
     reg signed [OUTPUT_FINAL_WIDTH - 1 : 0] output_final_reg [INPUT_TILE_SIZE - KERNEL_SIZE : 0] [INPUT_TILE_SIZE - KERNEL_SIZE : 0];
-    
     
     reg LoadDone, TransStage1Done, TransStage2Done, ewmmDone, out1Done, out2Done;
     
+    integer i, j, k; // Loop variables
     
-    
-    integer i, j, k; // Defined as loop variables
-    
-    // This block loads the Kernel input data from a flattened 1D vector into a Kernel of proper size (K x K x M)
+    // 1. Load kernel data
     always @(posedge clk)
     begin
         if(reset)
@@ -71,6 +75,7 @@ module PE #(
                     for (k = 0; k < CHANNELS; k = k + 1)
                     begin
                         kernel_reg[i][j][k] <= 0;
+                        kernel_fixed[i][j][k] <= 0;
                     end
                 end
             end
@@ -83,7 +88,10 @@ module PE #(
                 begin
                     for (k = 0; k < CHANNELS; k = k + 1)
                     begin
+                        // Load original kernel values
                         kernel_reg[i][j][k] <= Kernel[((k * KERNEL_SIZE * KERNEL_SIZE + i * KERNEL_SIZE + j) * KERNEL_DATA_WIDTH) +: KERNEL_DATA_WIDTH];
+                        // Convert to fixed-point by shifting left by FRAC_BITS
+                        kernel_fixed[i][j][k] <= Kernel[((k * KERNEL_SIZE * KERNEL_SIZE + i * KERNEL_SIZE + j) * KERNEL_DATA_WIDTH) +: KERNEL_DATA_WIDTH] << FRAC_BITS;
                     end
                 end
             end
@@ -91,7 +99,7 @@ module PE #(
         end
     end
     
-    // This block loads the input data from a flattened 1D vector into a Image Matrix of proper size (N x N x M)
+    // 2. Load input data
     always @(posedge clk)
     begin
         if(reset)
@@ -121,10 +129,8 @@ module PE #(
             end
         end
     end
-
     
-    // Winograd transformation:
-    // For 4x4 input tile and 3x3 kernel := B' . d
+    // 3. Input transformation (BT_d = B'.d) - keep as integer arithmetic
     always @(posedge clk)
     begin
         if (reset)
@@ -154,11 +160,8 @@ module PE #(
             end
         end
     end
-
     
-    // This block is responsible for the second part (B' d B) of the input transformation
-    // The Kernel transformtaion and the output transformation also follow similar logic
-    // Second part of Winograd Transformation : ( (prev) . B)
+    // 4. Complete input transformation (BdB = (BT_d).B)
     always @(posedge clk)
     begin
         if (reset)
@@ -188,9 +191,8 @@ module PE #(
             end
         end
     end
-
     
-    // Kernel Transformation
+    // 5. Kernel transformation stage 1 (fixed-point) - G_g = G.g
     always @(posedge clk)
     begin
         if (reset)
@@ -202,7 +204,7 @@ module PE #(
                 begin
                     for(i = 0; i < INPUT_TILE_SIZE; i = i + 1)
                     begin
-                        kernel_temp_reg[i][j][k] <= 0;
+                        kernel_temp_fixed[i][j][k] <= 0;
                     end
                 end
             end
@@ -213,19 +215,32 @@ module PE #(
             begin
                 for(j = 0; j < KERNEL_SIZE; j = j + 1)
                 begin
-                    kernel_temp_reg[3][j][k] <= kernel_reg[2][j][k];
-                    kernel_temp_reg[2][j][k] <= (kernel_reg[2][j][k] + kernel_reg[1][j][k] + kernel_reg[0][j][k]) >>> 1;
-                    kernel_temp_reg[1][j][k] <= (kernel_reg[2][j][k] - kernel_reg[1][j][k] + kernel_reg[0][j][k]) >>> 1;
-                    kernel_temp_reg[0][j][k] <= kernel_reg[0][j][k];
+                    // G(0,0) = 1
+                    kernel_temp_fixed[0][j][k] <= kernel_fixed[0][j][k];
+                    
+                    // G(1,0) = 0.5, G(1,1) = 0.5, G(1,2) = 0.5
+                    // Using fixed-point multiplication: val * HALF then normalize by right shift
+                    kernel_temp_fixed[1][j][k] <= 
+                        ((kernel_fixed[0][j][k] * HALF) >> FRAC_BITS) + 
+                        ((kernel_fixed[1][j][k] * HALF) >> FRAC_BITS) + 
+                        ((kernel_fixed[2][j][k] * HALF) >> FRAC_BITS);
+                    
+                    // G(2,0) = 0.5, G(2,1) = -0.5, G(2,2) = 0.5
+                    kernel_temp_fixed[2][j][k] <= 
+                        ((kernel_fixed[0][j][k] * HALF) >> FRAC_BITS) + 
+                        (((-kernel_fixed[1][j][k]) * HALF) >> FRAC_BITS) + 
+                        ((kernel_fixed[2][j][k] * HALF) >> FRAC_BITS);
+                    
+                    // G(3,2) = 1
+                    kernel_temp_fixed[3][j][k] <= kernel_fixed[2][j][k];
                 end
             end
             if (LoadDone)
                 TransStage1Done <= 1'b1;
         end
     end
-
     
-    // Kernel Output Transformation
+    // 6. Kernel transformation stage 2 (fixed-point) - GgG = (G_g).G'
     always @(posedge clk)
     begin
         if (reset)
@@ -237,7 +252,7 @@ module PE #(
                 begin
                     for(i = 0; i < INPUT_TILE_SIZE; i = i + 1)
                     begin
-                        kernel_transformed_reg[j][i][k] <= 0;
+                        kernel_transformed_fixed[j][i][k] <= 0;
                     end
                 end
             end
@@ -248,19 +263,31 @@ module PE #(
             begin
                 for(j = 0; j < INPUT_TILE_SIZE; j = j + 1)
                 begin
-                    kernel_transformed_reg[j][3][k] <= kernel_temp_reg[j][2][k];
-                    kernel_transformed_reg[j][2][k] <= (kernel_temp_reg[j][2][k] + kernel_temp_reg[j][1][k] + kernel_temp_reg[j][0][k]) >>> 1;
-                    kernel_transformed_reg[j][1][k] <= (kernel_temp_reg[j][2][k] - kernel_temp_reg[j][1][k] + kernel_temp_reg[j][0][k]) >>> 1;
-                    kernel_transformed_reg[j][0][k] <= kernel_temp_reg[j][0][k];
+                    // G'(0,0) = 1
+                    kernel_transformed_fixed[j][0][k] <= kernel_temp_fixed[j][0][k];
+                    
+                    // G'(0,1) = 0.5, G'(1,1) = 0.5, G'(2,1) = 0.5
+                    kernel_transformed_fixed[j][1][k] <= 
+                        ((kernel_temp_fixed[j][0][k] * HALF) >> FRAC_BITS) + 
+                        ((kernel_temp_fixed[j][1][k] * HALF) >> FRAC_BITS) + 
+                        ((kernel_temp_fixed[j][2][k] * HALF) >> FRAC_BITS);
+                    
+                    // G'(0,2) = 0.5, G'(1,2) = -0.5, G'(2,2) = 0.5
+                    kernel_transformed_fixed[j][2][k] <= 
+                        ((kernel_temp_fixed[j][0][k] * HALF) >> FRAC_BITS) + 
+                        (((-kernel_temp_fixed[j][1][k]) * HALF) >> FRAC_BITS) + 
+                        ((kernel_temp_fixed[j][2][k] * HALF) >> FRAC_BITS);
+                    
+                    // G'(2,3) = 1
+                    kernel_transformed_fixed[j][3][k] <= kernel_temp_fixed[j][2][k];
                 end
             end
             if (TransStage1Done)
                 TransStage2Done <= 1'b1;
         end
     end
-
     
-    // Element-Wise Matrix Multiplication (EWMM)
+    // 7. Element-wise matrix multiplication with fixed-point kernel
     always @(posedge clk)
     begin
         if (reset)
@@ -285,7 +312,8 @@ module PE #(
                 begin
                     for (j = 0; j < INPUT_TILE_SIZE; j = j + 1)
                     begin
-                        ewmm_reg[i][j][k] <= input_transformed_reg[i][j][k] * kernel_transformed_reg[i][j][k];
+                        // Convert input to fixed-point by shifting, then multiply
+                        ewmm_reg[i][j][k] <= (input_transformed_reg[i][j][k] << FRAC_BITS) * kernel_transformed_fixed[i][j][k];
                     end
                 end
             end
@@ -293,9 +321,8 @@ module PE #(
                 ewmmDone <= 1'b1;
         end
     end
-
     
-   // Output Transformation (Winograd Inverse Transform - Row Transformation)
+    // 8. Output transformation stage 1 - Row transformation
     always @(posedge clk)
     begin
         if (reset)
@@ -316,8 +343,9 @@ module PE #(
             begin
                 for (j = 0; j < INPUT_TILE_SIZE; j = j + 1)
                 begin
-                    output_reg1[1][j][k] <= ewmm_reg[1][j][k] + ewmm_reg[2][j][k] + ewmm_reg[3][j][k];
-                    output_reg1[0][j][k] <= ewmm_reg[2][j][k] - ewmm_reg[1][j][k] - ewmm_reg[0][j][k];
+                    // Normalize by right shift to remove extra fractional bits from ewmm_reg
+                    output_reg1[1][j][k] <= (ewmm_reg[1][j][k] + ewmm_reg[2][j][k] + ewmm_reg[3][j][k]) >> FRAC_BITS;
+                    output_reg1[0][j][k] <= (ewmm_reg[2][j][k] - ewmm_reg[1][j][k] - ewmm_reg[0][j][k]) >> FRAC_BITS;
                 end
             end
             if (ewmmDone)
@@ -325,8 +353,7 @@ module PE #(
         end
     end
     
-    
-   // Output Transformation - Column Transformation
+    // 9. Output transformation stage 2 - Column transformation
     always @(posedge clk)
     begin
         if (reset)
@@ -355,8 +382,8 @@ module PE #(
                 out2Done <= 1'b1;
         end
     end
-
-    // This block performs the accumulation step where multiple channel outputs are added together into one single channel
+    
+    // 10. Final accumulation across channels
     always @(posedge clk)
     begin
         if (reset)
@@ -366,7 +393,7 @@ module PE #(
             begin
                 for (j = 0; j < INPUT_TILE_SIZE - KERNEL_SIZE + 1; j = j + 1)
                 begin
-                        output_final_reg[i][j] <= 0;
+                    output_final_reg[i][j] <= 0;
                 end
             end
         end
@@ -378,6 +405,8 @@ module PE #(
                 begin
                     for (j = 0; j < INPUT_TILE_SIZE - KERNEL_SIZE + 1; j = j + 1)
                     begin
+                        output_final_reg[i][j] <= 0; // Reset before accumulation
+                        
                         for (k = 0; k < CHANNELS; k = k + 1)
                         begin
                             output_final_reg[i][j] <= output_final_reg[i][j] + output_reg2[i][j][k];
@@ -388,22 +417,27 @@ module PE #(
             end
         end
     end
-
     
-    // This block is used to convert the (R x R) output tile into a flattened 1D vector for output
+    // 11. Pack the output into the outData register
     always @(posedge clk)
     begin
-        for (i = 0; i < INPUT_TILE_SIZE - KERNEL_SIZE + 1; i = i + 1)
+        if (reset)
         begin
-            for (j = 0; j < INPUT_TILE_SIZE - KERNEL_SIZE + 1; j = j + 1)
+            for (i = 0; i < (INPUT_TILE_SIZE - KERNEL_SIZE + 1) * (INPUT_TILE_SIZE - KERNEL_SIZE + 1); i = i + 1)
             begin
-                for (k = 0; k < CHANNELS; k = k + 1)
+                outData[i * (KERNEL_DATA_WIDTH + INPUT_DATA_WIDTH + 13) +: (KERNEL_DATA_WIDTH + INPUT_DATA_WIDTH + 13)] <= 0;
+            end
+        end
+        else if (finalCompute)
+        begin
+            for (i = 0; i < INPUT_TILE_SIZE - KERNEL_SIZE + 1; i = i + 1)
+            begin
+                for (j = 0; j < INPUT_TILE_SIZE - KERNEL_SIZE + 1; j = j + 1)
                 begin
-                    outData[(((INPUT_TILE_SIZE - KERNEL_SIZE + 1) * i + j) * CHANNELS + k) * OUTPUT_FINAL_WIDTH +: OUTPUT_FINAL_WIDTH] 
-                    <= output_final_reg[i][j];
+                    outData[((i * (INPUT_TILE_SIZE - KERNEL_SIZE + 1) + j) * (KERNEL_DATA_WIDTH + INPUT_DATA_WIDTH + 13)) +: (KERNEL_DATA_WIDTH + INPUT_DATA_WIDTH + 13)] <= output_final_reg[i][j];
                 end
             end
         end
     end
-
+    
 endmodule
