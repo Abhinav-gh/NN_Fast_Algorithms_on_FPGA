@@ -5,7 +5,7 @@ module line_buffer_tb_vivado;
 
     // Parameters
     parameter integer M = 3;
-    parameter integer W = 512;
+    parameter integer W = 10;
     parameter integer n = 4;
     parameter integer m = 2;
 
@@ -19,6 +19,7 @@ module line_buffer_tb_vivado;
     reg data_valid;
     wire [DATA_WIDTH-1:0] data_out;
     reg output_needs_to_be_read;
+    wire finish_reading;
 
     // Instantiate the Unit Under Test (UUT)
     line_buffer #(
@@ -32,7 +33,8 @@ module line_buffer_tb_vivado;
         .i_data(data_in),
         .i_data_valid(data_valid),
         .o_data(data_out),
-        .output_needs_to_be_read(output_needs_to_be_read)
+        .output_needs_to_be_read(output_needs_to_be_read),
+        .finish_reading(finish_reading)
     );
     
     
@@ -45,7 +47,7 @@ module line_buffer_tb_vivado;
     reg continue_reading;
     
     // For output verification
-    reg [7:0] expected_data [M*W-1:0];
+    reg [7:0] expected_data [0:M*W-1];
     reg [DATA_WIDTH-1:0] expected_output;
     
     // For memory viewing assistance
@@ -96,8 +98,7 @@ module line_buffer_tb_vivado;
         data_valid = 0;
         output_needs_to_be_read = 0;
         wr_ptr = 0;
-        // we have to start validating from rdPntr=2
-        rd_ptr = 2;
+        rd_ptr = 0;
         total_elements = M * W;
 
         // We'll validate 10 reads
@@ -112,7 +113,7 @@ module line_buffer_tb_vivado;
         $display("Starting to fill the line buffer with %0d elements", total_elements);
         
         // Pre-fill the expected data array
-        for (i = 0; i < total_elements; i = i + 1) begin
+        for (i = total_elements; i >= 0; i = i - 1) begin
             expected_data[i] = i % 256;
         end
         
@@ -133,48 +134,41 @@ module line_buffer_tb_vivado;
         
         // Wait a few clock cycles
         repeat(5) @(posedge clk);
-        
         // Read and validate data
         $display("Starting to read and validate data");
-        
-        // Without using 'break', we'll use a flag to limit validation
         continue_reading = 1;
         repeat (W) begin
-            if (continue_reading) begin
-
-                // Assert read enable for one cycle
+            if (continue_reading && !finish_reading) begin
+                // Assert read enable
                 @(posedge clk);
                 output_needs_to_be_read = 1;
-                
-                // Calculate expected output
+                // Prepare expected_output in advance
                 expected_output = 0;
                 for (i = 0; i < M; i = i + 1) begin
                     for (j = 0; j < n; j = j + 1) begin
                         expected_output[((M-1-i)*n*8 + (n-1-j)*8) +: 8] = expected_data[i*W + rd_ptr + j];
                     end
                 end
-
-                
-                // Check output on next clock
+                // Wait one clock to allow DUT to respond
                 @(posedge clk);
                 output_needs_to_be_read = 0;
-                
+                // Compare output now
                 if (data_out !== expected_output) begin
                     $display("ERROR at rd_ptr=%0d: Expected %h, Got %h", rd_ptr, expected_output, data_out);
                 end else begin
                     $display("Validation PASSED at rd_ptr=%0d", rd_ptr);
                 end
-                
                 rd_ptr = rd_ptr + m;
-                
-                // Only validate a few reads to keep output manageable
-                if (rd_ptr >= how_many_reads_to_validate) begin
-                    $display("Truncating validation after %0d reads", how_many_reads_to_validate);
+                if (rd_ptr + n - 1 >= W) begin
+                    $display("Truncating validation after final possible read");
                     continue_reading = 0;
                 end
             end
-        end
-        
+            else  begin 
+                expected_output = {M*n*8{1'b0}};
+            end
+        end 
+
         #100;
         $display("Testbench completed");
         $finish;

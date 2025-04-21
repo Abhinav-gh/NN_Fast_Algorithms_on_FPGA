@@ -1,10 +1,9 @@
 `timescale 1ns / 1ps
 
-
 module input_control_unit_tb;
     // Parameters
     parameter integer M = 3;        // Number of channels
-    parameter integer W = 512;      // Width of each Image
+    parameter integer W = 10;      // Width of each Image
     parameter integer n = 4;        // Input Tile size
     
     // Testbench signals
@@ -20,7 +19,7 @@ module input_control_unit_tb;
     integer pixel_counter;
     integer fill_count;
     integer read_cycles;
-    integer i, j;
+    integer i, j,k;
     
     // Index for monitoring line buffer contents
     reg [10:0] monitor_index;
@@ -42,12 +41,46 @@ module input_control_unit_tb;
     // Access line buffer memory cells via hierarchical paths
     // These will update dynamically based on monitor_index
     // Use hierarchical paths with variable indices
-    wire [7:0] lb1_cell = UUT.LB1.line[monitor_index-1];
-    wire [7:0] lb2_cell = UUT.LB2.line[monitor_index-1];
-    wire [7:0] lb3_cell = UUT.LB3.line[monitor_index-1];
-    wire [7:0] lb4_cell = UUT.LB4.line[monitor_index-1];
-    wire [7:0] lb5_cell = UUT.LB5.line[monitor_index-1];
-    wire [7:0] lb6_cell = UUT.LB6.line[monitor_index-1];
+
+    // We're monitoring the line buffer contents in the same clock cycle that the data is being written. 
+    // The line buffer uses synchronous writes (on posedge clock), 
+    // so the new data won't be visible until the next clock cycle !!!!
+    // reg [10:0] prev_monitor_index;
+    // always @(posedge i_clk) begin
+    //     prev_monitor_index <= monitor_index;
+    // end
+    // wire [7:0] lb1_cell = UUT.LB1.line[prev_monitor_index];  // This is one correct way to do it too ; but still we want some kind of wrapping around
+
+    // Debugging begin and end of Line Buffer to debug OFF By 1 errors
+    wire [7:0] lb1_cell_0 = UUT.LB1.line[0];
+    wire [7:0] lb2_cell_0 = UUT.LB2.line[0];
+    wire [7:0] lb3_cell_0 = UUT.LB3.line[0];
+    wire [7:0] lb4_cell_0 = UUT.LB4.line[0];
+    wire [7:0] lb5_cell_0 = UUT.LB5.line[0];
+    wire [7:0] lb6_cell_0 = UUT.LB6.line[0];
+
+    wire [7:0] lb1_cell_last_elem = UUT.LB1.line[M*W-1];
+    wire [7:0] lb2_cell_last_elem = UUT.LB2.line[M*W-1];
+    wire [7:0] lb3_cell_last_elem = UUT.LB3.line[M*W-1];
+    wire [7:0] lb4_cell_last_elem = UUT.LB4.line[M*W-1];
+    wire [7:0] lb5_cell_last_elem = UUT.LB5.line[M*W-1];
+    wire [7:0] lb6_cell_last_elem = UUT.LB6.line[M*W-1];
+
+    wire [7:0] lb1_cell_2nd_last_elem = UUT.LB1.line[M*W-2];
+    wire [7:0] lb2_cell_2nd_last_elem = UUT.LB2.line[M*W-2];
+    wire [7:0] lb3_cell_2nd_last_elem = UUT.LB3.line[M*W-2];
+    wire [7:0] lb4_cell_2nd_last_elem = UUT.LB4.line[M*W-2];
+    wire [7:0] lb5_cell_2nd_last_elem = UUT.LB5.line[M*W-2];
+    wire [7:0] lb6_cell_2nd_last_elem = UUT.LB6.line[M*W-2];
+
+
+    // This is SOOOO FRICKING wierd, monitor_index-2 is the correct index to look :(
+    wire [7:0] lb1_cell = UUT.LB1.line[(monitor_index == 0) ? M*W-1 : monitor_index - 1];
+    wire [7:0] lb2_cell = UUT.LB2.line[(monitor_index == 0) ? M*W-1 : monitor_index - 1];
+    wire [7:0] lb3_cell = UUT.LB3.line[(monitor_index == 0) ? M*W-1 : monitor_index - 1];
+    wire [7:0] lb4_cell = UUT.LB4.line[(monitor_index == 0) ? M*W-1 : monitor_index - 1];
+    wire [7:0] lb5_cell = UUT.LB5.line[(monitor_index == 0) ? M*W-1 : monitor_index - 1];
+    wire [7:0] lb6_cell = UUT.LB6.line[(monitor_index == 0) ? M*W-1 : monitor_index - 1];
     
     // Access to write pointers for monitoring
     wire [10:0] lb1_wr_ptr = UUT.LB1.wrPntr;
@@ -79,7 +112,7 @@ module input_control_unit_tb;
     reg  [1:0] prev_state;
     
     // Output data verification
-    reg [3*4*4*8-1:0] expected_output;
+    reg [8:0] input_tile [M-1:0][n-1:0][n-1:0];
     reg [7:0] output_data[0:3*4*4-1];
     
     // Clock generation - starts with high, period of 10ns
@@ -87,11 +120,26 @@ module input_control_unit_tb;
         i_clk = 1;
         forever #5 i_clk = ~i_clk;  // Toggle every 5ns -> 10ns period
     end
+
+    // Parameters
+    parameter NUM_CLOCK_CYCLE_FOR_REST_HIGH = 3;
+    reg [31:0] rst_counter = 0;
+    // Reset logic: assert reset only once for NUM_CLOCK_CYCLE_FOR_REST_HIGH cycles
+    always @(posedge i_clk) begin
+        if (rst_counter < NUM_CLOCK_CYCLE_FOR_REST_HIGH) begin
+            i_rst <= 1;
+            rst_counter <= rst_counter + 1;
+        end else begin
+            i_rst <= 0;
+            // Begin data feeding
+            i_pixel_data_valid = 1;
+        end
+    end
     
     // Initialize all signals
     initial begin
         i_rst = 1;
-        i_pixel_data = 0;
+        i_pixel_data = 17;
         i_pixel_data_valid = 0;
         proc_finish = 0;
         pixel_counter = 0;
@@ -101,26 +149,26 @@ module input_control_unit_tb;
         prev_state = 0;
         
         // Initialize expected output
-        expected_output = 0;
         for (i = 0; i < 3*4*4; i = i + 1) begin
             output_data[i] = 0;
         end
         
         // Apply reset for 30ns, and make it low
-        #30;
-        i_rst = 0;
+        // Synchronize reset release with clock
+        // @(posedge i_clk);
+        // @(posedge i_clk);
+        // @(posedge i_clk);
+        // i_rst = 0;
         
         // Start testing
         $display("Starting test sequence at %0t", $time);
         
-        // Begin data feeding
-        i_pixel_data_valid = 1;
     end
     
     // Generate pixel data based on counter, mod 256
     always @(posedge i_clk) begin
         if (i_pixel_data_valid) begin
-            i_pixel_data <= (pixel_counter % 256);
+            i_pixel_data <= (pixel_counter % 30);
             pixel_counter <= pixel_counter + 1;
         end
     end
@@ -171,25 +219,21 @@ module input_control_unit_tb;
     always @(posedge i_clk) begin
         if (o_ready) begin
             read_cycles <= read_cycles + 1;
-            
             // Display output data
             $display("Output Ready at cycle %0d, State: %0d, Time: %0t", read_cycles, current_state, $time);
-            
-            // Extract and display a portion of the output data
-            for (i = 0; i < 3; i = i + 1) begin // For each channel
-                $display("Channel %0d output:", i);
-                for (j = 0; j < 4; j = j + 1) begin // Show 4x4 tile
-                    // $write("%3d %3d %3d %3d | ", 
-                    //         o_input_tile_across_all_channel[(i*4*4*8) + (j*4*8) + 7 : (i*4*4*8) + (j*4*8)],
-                    //         o_input_tile_across_all_channel[(i*4*4*8) + (j*4*8) + 15 : (i*4*4*8) + (j*4*8) + 8],
-                    //         o_input_tile_across_all_channel[(i*4*4*8) + (j*4*8) + 23 : (i*4*4*8) + (j*4*8) + 16],
-                    //         o_input_tile_across_all_channel[(i*4*4*8) + (j*4*8) + 31 : (i*4*4*8) + (j*4*8) + 24]);
-                    $write("\n");
+            for (i = 0; i < M; i = i + 1) begin
+                for (j = 0; j < n; j = j + 1) begin
+                    for (k = 0; k < n; k = k + 1) begin
+                        input_tile[i][j][k] = o_input_tile_across_all_channel[
+                            (i * n * n * 8) + (j * n * 8) + (k * 8) +: 8
+                        ];
+                        $display("input_tile[%0d][%0d][%0d]: %0d", i, j, k, input_tile[i][j][k]);
+                    end
                 end
             end
+            end
         end
-    end
-    
+
     // Keep track of fill count for debugging
     always @(posedge i_clk) begin
         if (i_rst)

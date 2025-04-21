@@ -95,3 +95,68 @@ module array_filler_BETTER(
     end
 
 endmodule
+
+
+
+// Lesson 2 
+
+module three_dim_arrays_all_little_endian;
+    reg signed [7:0] inpdata_viz [0:2][0:3][0:3]; // 3D array (3x4x4)
+    reg signed [7:0] inpdata [0:47];  // Flattened 3D array stored as a linear array
+    integer i, j, k;
+    reg clk;
+
+    // Clock generation
+    initial begin
+        clk = 1;
+        forever #5 clk = ~clk;
+    end
+
+    // Initialize data
+    initial begin
+        inpdata = {
+            // channel 2 (4x4)
+            8'sd1,  8'sd2,  8'sd3,  8'sd4,   // row 1
+            8'sd5,  8'sd6,  8'sd7,  8'sd8,   // row 2
+            8'sd9,  8'sd10, 8'sd11, 8'sd12,  // row 3
+            8'sd13, 8'sd14, 8'sd15, 8'sd16,  // row 4
+
+            // channel 1 (4x4)
+            8'sd1, 8'sd1, 8'sd1, 8'sd1,   // row 1
+            8'sd1, 8'sd1, 8'sd1, 8'sd1,   // row 2
+            8'sd1, 8'sd1, 8'sd1, 8'sd1,   // row 3
+            8'sd1, 8'sd1, 8'sd1, 8'sd1,   // row 4
+
+            // channel 0 (4x4)
+            8'sd1, 8'sd2, 8'sd3, 8'sd4,      // row 1
+           -8'sd1,-8'sd2,-8'sd3,-8'sd4,      // row 2
+            8'sd1,-8'sd2, 8'sd3,-8'sd4,      // row 3
+            8'sd0, 8'sd0, 8'sd0,-8'sd1       // row 4
+        };
+    end
+
+    // Mapping inpdata to 3D inpdata_viz
+    always @(posedge clk) begin
+        for (i = 0; i < 3; i = i + 1) begin
+            for (j = 0; j < 4; j = j + 1) begin
+                for (k = 0; k < 4; k = k + 1) begin
+                    inpdata_viz[i][j][k] = inpdata[(i*16) + (j*4) + k];
+                end
+            end
+        end
+
+        // Display the 3D array contents
+        $display("3D Array Representation:");
+        for (i = 0; i < 3; i = i + 1) begin
+            $display("Channel %0d:", i);
+            for (j = 0; j < 4; j = j + 1) begin
+                $write("Row %0d: ", j);
+                for (k = 0; k < 4; k = k + 1) begin
+                    $write("%d ", inpdata_viz[i][j][k]);
+                end
+                $display("");
+            end
+            $display(""); // Blank line for readability
+        end
+    end
+endmodule

@@ -5,7 +5,7 @@ module PE_fft #(
     KERNEL_DATA_WIDTH = 8,
     CHANNELS = 3
 )(
-    // Global Signal    s
+    // Global Signals
     input clk,
     input reset,
     
@@ -150,9 +150,7 @@ module PE_fft #(
 
     reg signed [IFFT_IMG_WIDTH-1:0]inverse_trans_real [0:CHANNELS-1][0:INPUT_TILE_SIZE-1][0:INPUT_TILE_SIZE-1];
     // Final output accumulation
-    reg signed [OUTPUT_WIDTH-1:0] output_accum [0:INPUT_TILE_SIZE/2-1][0:INPUT_TILE_SIZE/2-1] ; // 3x2x2 output
-    
-    reg signed [OUTPUT_WIDTH - 1:0] temp_sum;
+    reg signed [OUTPUT_WIDTH-1:0] output_accum [0:CHANNELS-1][0:INPUT_TILE_SIZE/2-1][0:INPUT_TILE_SIZE/2-1] ; // 3x2x2 output
 
 
     // Control signals
@@ -187,16 +185,6 @@ module PE_fft #(
             ifft_row_compute_done<=0;
             ifft_col_compute_done<=0;
             finalCompute <= 0;
-            
-//            for (ch = 0; ch < CHANNELS; ch = ch + 1) begin
-//                for (i = 0; i < INPUT_TILE_SIZE; i = i + 1) begin
-//                    for (j = 0; j < INPUT_TILE_SIZE; j = j + 1) begin
-                        
-//                   end
-//                  end
-//                 end
-    
-        
             // Other reset logic would go here
         end else begin
 
@@ -396,33 +384,31 @@ module PE_fft #(
                 if(!ifft_row_compute_done) begin
                     for (ch = 0; ch < CHANNELS; ch = ch + 1) begin
                         for (i = 0; i < INPUT_TILE_SIZE; i = i + 1) begin
-                            for (j = 0 ; j < INPUT_TILE_SIZE ; j = j + 1) begin
-                            // for (j = 0; j < INPUT_TILE_SIZE; j = j + 1) begin
+                            for (j = 0; j < INPUT_TILE_SIZE; j = j + 1) begin
                                 // Initialize accumulators
                                 real_acc = 0;
                                 img_acc = 0;
+                                
                                 for (k = 0; k < INPUT_TILE_SIZE; k = k + 1) begin
                                     // Correct order: W_inv * E (fft_real is W_inv_real, ifft_img is W_inv_img)
                                     // Real part: W_inv_real*E_real - W_inv_img*E_img
                                     
                                     real_acc = real_acc + 
-                                        (fft_real[k][j] * ewmm_real[ch][i][k] - 
-                                        ifft_img[k][j] * ewmm_img[ch][i][k]);
+                                        (fft_real[i][k] * ewmm_real[ch][k][j] - 
+                                        ifft_img[i][k] * ewmm_img[ch][k][j]);
                                     
                                     img_acc = img_acc + 
-                                        (fft_real[k][j] * ewmm_img[ch][i][k] + 
-                                        ifft_img[k][j] * ewmm_real[ch][i][k]);
-                                    if (ch == 2 ) begin
-                                    // $display("Computing real_acc and img_acc for ch=%0d, i=%0d, j=%0d, k=%0d", ch, i, j, k);
-                                    // $display("fft_real[%0d][%0d] = %0d, ewmm_real[%0d][%0d][%0d] = %0d, ifft_img[%0d][%0d] = %0d, ewmm_img[%0d][%0d][%0d] = %0d", 
-                                    //     i, k, fft_real[i][k], ch, k, j, ewmm_real[ch][k][j], i, k, ifft_img[i][k], ch, k, j, ewmm_img[ch][k][j]);
-                                    end
+                                        (fft_real[i][k] * ewmm_img[ch][k][j] + 
+                                        ifft_img[i][k] * ewmm_real[ch][k][j]);
+                                    
+                                    $display("Computing real_acc and img_acc for ch=%0d, i=%0d, j=%0d, k=%0d", ch, i, j, k);
+                                    $display("fft_real[%0d][%0d] = %0d, ewmm_real[%0d][%0d][%0d] = %0d, ifft_img[%0d][%0d] = %0d, ewmm_img[%0d][%0d][%0d] = %0d", 
+                                        i, k, fft_real[i][k], ch, k, j, ewmm_real[ch][k][j], i, k, ifft_img[i][k], ch, k, j, ewmm_img[ch][k][j]);
 
-                                 end
+                                end
                                 // Store intermediate results (scale by N=4 here)
                                 row_ifft_real[ch][i][j] = real_acc >>> 2;
                                 row_ifft_img[ch][i][j] = img_acc >>> 2;
-                                
                                 $display("After iteration j=%0d, real_ifft_real[%0d][%0d][%0d] = %0d, real_ifft_img[%0d][%0d][%0d] = %0d", j ,ch,i,j,row_ifft_real[ch][i][j] ,ch,i,j, row_ifft_img[ch][i][j]);
                                 $display("\n\n\n\n");
                             end
@@ -458,27 +444,13 @@ module PE_fft #(
                                 $display("After iteration j=%0d, inverse_trans_real[%0d][%0d][%0d] = %0d", j ,ch,i,j,row_ifft_real[ch][i][j]);
 
                                 // Accumulate only the center 2x2 region
-//                                if (i >= 1 && i < 3 && j >= 1 && j < 3) begin
-//                                    output_accum[ch][i-1][j-1] = output_accum[ch][i-1][j-1] + 
-//                                        inverse_trans_real[ch][i][j];
-//                                end
+                                if (i >= 1 && i < 3 && j >= 1 && j < 3) begin
+                                    output_accum[ch][i-1][j-1] = output_accum[ch][i-1][j-1] + 
+                                        inverse_trans_real[ch][i][j];
+                                end
                             end
                         end
                     end
-                    
-                    //===================================================
-                    // Step 6: Accumulation Step
-                    //===================================================
-                        for (i = 2; i < INPUT_TILE_SIZE; i = i + 1) begin        
-                            for (j = 2; j < INPUT_TILE_SIZE; j = j + 1) begin
-                                temp_sum = 0;
-                                for (ch = 0; ch < CHANNELS; ch = ch + 1) begin
-                                    temp_sum = temp_sum + inverse_trans_real[ch][i][j];
-                                end
-                                output_accum[i-2][j-2] <= temp_sum;
-
-                            end
-                        end
                     ifft_col_compute_done <= 1;
                 end
                 

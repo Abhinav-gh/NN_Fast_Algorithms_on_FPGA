@@ -1,5 +1,3 @@
-
-
 module line_buffer #(
     parameter integer M = 3,        // Number of channels
     parameter integer W = 10,       // Width of each Image
@@ -11,7 +9,8 @@ module line_buffer #(
     input [7:0]             i_data,
     input                   i_data_valid,
     output reg [M*n*8-1:0] o_data,  
-    input                   output_needs_to_be_read
+    input                   output_needs_to_be_read,
+    output reg finish_reading
 );
     // Calculate pointer width based on M*W, 10 in our case
     localparam PNTR_WIDTH = $clog2(M*W);
@@ -42,69 +41,34 @@ module line_buffer #(
     always @(posedge i_clk) begin
         if(i_rst) begin
             o_data <= {M*n*8{1'b0}}; 
-            // finish_reading <= 0;
-        // else if (output_needs_to_be_read && !finish_reading) begin
-        end else if (output_needs_to_be_read ) begin
-            $display("rdPntr: %d, n: %d, W: %d, rdPntr + n: %d, Condition (rdPntr + n <= W): %b", rdPntr, n, W, rdPntr + n, (rdPntr + n <= W));
+            finish_reading <= 0;
+        end else if (output_needs_to_be_read && !finish_reading) begin
             for (i = 0; i < M; i = i + 1) begin
                 for (j = 0; j < n; j = j + 1) begin
                     o_data[((M-1-i)*n*8 + (n-1-j)*8) +: 8] <= line[i*W + rdPntr + j];
                 end
             end
             // Check if next read would exceed valid region
-        //     if (rdPntr + n >= W)
-        //         finish_reading <= 1;
-        // end else if (finish_reading) begin
-        //     o_data <= {M*n*8{1'b0}};
-        //     finish_reading <= 0;
+            if (rdPntr + m + n - 1 >= W)
+                finish_reading <= 1;
+        end else if (finish_reading) begin
+            o_data <= {M*n*8{1'b0}};
+            finish_reading <= 0;
         end
-    end
+end
+
 
 
     // read pointer logic
     always @(posedge i_clk) begin
         if (i_rst)
             rdPntr <= 0;
-        else if (output_needs_to_be_read && rdPntr + n < W) 
+        else if (output_needs_to_be_read)
             rdPntr <= rdPntr + m;
-        // else if ( output_needs_to_be_read && rdPntr == W) begin
-        //     rdPntr <= 0;
-        // end
     end
 
-
-   // Register to store previous rdPntr value
-    reg [7:0] prev_rdPntr;
-    
-    // Counter to track how many cycles rdPntr remains unchanged
-    reg [2:0] stable_count;  // 3 bits to count up to 4
-    always @(posedge i_clk or posedge i_rst) begin
-            if (i_rst) begin
-                rdPntr <= 8'b0;
-                prev_rdPntr <= 8'b0;
-                stable_count <= 3'b0;
-            end else begin
-                // Check if rdPntr has changed
-                if (rdPntr != prev_rdPntr) begin
-                    // rdPntr changed, reset the stable count
-                    stable_count <= 3'b0;
-                    prev_rdPntr <= rdPntr;
-                end else begin
-                    // rdPntr stayed the same, increment stable count
-                    if (stable_count < 3'd4) begin
-                        stable_count <= stable_count + 1'b1;
-                    end
-                    
-                    // If rdPntr has been stable for 4 cycles, reset rdPntr
-                    if (stable_count == 3'd3) begin
-                        rdPntr <= 8'b0; 
-                        o_data <= {M*n*8{1'b0}};
-                        stable_count <= 3'b0;
-                    end
-                end
-            end
-        end
 endmodule
+
 
     /*
     The implementation uses a 3-cycle read process:
@@ -123,7 +87,7 @@ module input_control_unit #(
     input                    i_rst,
     input [7:0]              i_pixel_data,
     input                    i_pixel_data_valid,
-    output                    proc_finish,
+    input                    proc_finish,
     output reg [3*4*4*8-1:0] o_input_tile_across_all_channel,
     output reg               o_ready
 );
@@ -154,7 +118,8 @@ module input_control_unit #(
     // Pixel routing control
     reg [7:0] pixel_to_lb1, pixel_to_lb2, pixel_to_lb3, pixel_to_lb4, pixel_to_lb5, pixel_to_lb6;
     reg valid_to_lb1, valid_to_lb2, valid_to_lb3, valid_to_lb4, valid_to_lb5, valid_to_lb6;
-
+    wire finish_reading_lb1, finish_reading_lb2, finish_reading_lb3, finish_reading_lb4, finish_reading_lb5, finish_reading_lb6;
+        
     // Line buffer instantiations
     line_buffer #(
         .M(M),
@@ -166,7 +131,8 @@ module input_control_unit #(
         .i_data(pixel_to_lb1),
         .i_data_valid(valid_to_lb1),
         .o_data(lb1_data),
-        .output_needs_to_be_read(lb1_is_ready_to_be_read)
+        .output_needs_to_be_read(lb1_is_ready_to_be_read),
+        .finish_reading(finish_reading_lb1)
     );
         
     line_buffer #(
@@ -179,7 +145,8 @@ module input_control_unit #(
         .i_data(pixel_to_lb2),
         .i_data_valid(valid_to_lb2),
         .o_data(lb2_data),
-        .output_needs_to_be_read(lb2_is_ready_to_be_read)
+        .output_needs_to_be_read(lb2_is_ready_to_be_read),
+        .finish_reading(finish_reading_lb2)
     );
         
     line_buffer #(
@@ -192,7 +159,8 @@ module input_control_unit #(
         .i_data(pixel_to_lb3),
         .i_data_valid(valid_to_lb3),
         .o_data(lb3_data),
-        .output_needs_to_be_read(lb3_is_ready_to_be_read)
+        .output_needs_to_be_read(lb3_is_ready_to_be_read),
+        .finish_reading(finish_reading_lb3)
     );
         
     line_buffer #(
@@ -205,7 +173,8 @@ module input_control_unit #(
         .i_data(pixel_to_lb4),
         .i_data_valid(valid_to_lb4),
         .o_data(lb4_data),
-        .output_needs_to_be_read(lb4_is_ready_to_be_read)
+        .output_needs_to_be_read(lb4_is_ready_to_be_read),
+        .finish_reading(finish_reading_lb4)
     );
         
     line_buffer #(
@@ -218,7 +187,8 @@ module input_control_unit #(
         .i_data(pixel_to_lb5),
         .i_data_valid(valid_to_lb5),
         .o_data(lb5_data),
-        .output_needs_to_be_read(lb5_is_ready_to_be_read)
+        .output_needs_to_be_read(lb5_is_ready_to_be_read),
+        .finish_reading(finish_reading_lb5)
     );
         
     line_buffer #(
@@ -231,7 +201,8 @@ module input_control_unit #(
         .i_data(pixel_to_lb6),
         .i_data_valid(valid_to_lb6),
         .o_data(lb6_data),
-        .output_needs_to_be_read(lb6_is_ready_to_be_read)
+        .output_needs_to_be_read(lb6_is_ready_to_be_read),
+        .finish_reading(finish_reading_lb6)
     );
         
     // State transition logic
@@ -274,7 +245,7 @@ module input_control_unit #(
     end
         
     // Fill counter logic
-    always @(posedge i_clk) begin
+    always @(posedge i_clk or posedge i_rst) begin
         if (i_rst) begin
             fill_counter <= 0;
         end else if (i_pixel_data_valid) begin
@@ -317,24 +288,18 @@ module input_control_unit #(
                     o_ready <= 0;
                 end
                 default: begin // STATE1, STATE2, STATE3
-                // as long as read_counter is less than 5 we read out outputs, every 3 clocks
-                if( read_counter < ( (W-n)/2 + 1 + 1)) begin
-                        if (read_cycle == 2'd2) begin
-                            read_cycle <= 0;
-                            read_counter <= read_counter + 1;
-                        end
-                        else  read_cycle <= read_cycle + 1;
-                        
-                        // Assert o_ready when we've completed a read cycle
-                        o_ready <= (read_cycle == 2'd2);
-                    end
-                else begin
+                    if (read_cycle == 2'd2) begin
                         read_cycle <= 0;
-                        o_ready <= 0;
-                        o_input_tile_across_all_channel <= 0;
-                        if(current_state != next_state) read_counter <= 0;
+                        if (read_counter >= (W - n))
+                            read_counter <= 0;
+                        else
+                            read_counter <= read_counter + 1;
+                    end else begin
+                        read_cycle <= read_cycle + 1;
                     end
-                end 
+                    // Assert o_ready when we've completed a read cycle
+                    o_ready <= (read_cycle == 2'd2);
+                end
             endcase
         end
     end
@@ -426,12 +391,42 @@ module input_control_unit #(
         end
     end
 
+    // // Output tile formation
+    // always @(posedge i_clk) begin
+    //     if (i_rst) begin
+    //         o_input_tile_across_all_channel <= 0;
+    //     end else if (o_ready) begin
+    //         case (current_state)
+    //             // LSB as the first data
+    //             STATE1: begin
+    //                 o_input_tile_across_all_channel <= {lb6_data, lb5_data, lb4_data, lb3_data};
+    //             end
+                    
+    //             STATE2: begin
+    //                 o_input_tile_across_all_channel <= {lb2_data, lb1_data, lb6_data, lb5_data};
+    //             end
+                    
+    //             STATE3: begin
+    //                 o_input_tile_across_all_channel <= {lb4_data, lb3_data, lb2_data, lb1_data};
+    //             end
+                    
+    //             default: begin
+    //                 o_input_tile_across_all_channel <= 0;
+    //             end
+    //         endcase
+    //     end
+    // end
+
     // Output tile formation
     always @(posedge i_clk) begin
         if (i_rst) begin
             o_input_tile_across_all_channel <= 0;
         end 
-
+        // else if (finish_reading_lb1 || finish_reading_lb2 || finish_reading_lb3 || 
+        //         finish_reading_lb4 || finish_reading_lb5 || finish_reading_lb6) begin
+        //     // Reset output when reading is finished
+        //     o_input_tile_across_all_channel <= 0;
+        // end
         else if (o_ready) begin
             case (current_state)
                 // STATE1: lb3, lb4, lb5, lb6 
@@ -476,4 +471,5 @@ module input_control_unit #(
             endcase
         end
     end
+
 endmodule
